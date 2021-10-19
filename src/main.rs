@@ -5,6 +5,7 @@ use nb::block;
 use panic_semihosting as _;
 use cortex_m;
 use cortex_m_rt::entry;
+use embedded_hal::digital::v2::OutputPin;
 use stm32f1xx_hal::{delay::Delay, gpio, i2c::{ BlockingI2c, Mode}, pac, prelude::*, serial:: { Serial, StopBits, Config }};
 
 type TypeUART2 = Serial<pac::USART2,
@@ -19,8 +20,9 @@ type TypeI2C1 = BlockingI2c<pac::I2C1,
         gpio::gpiob::PB9<gpio::Alternate<gpio::OpenDrain>>
     )>;
 
-type TypeData = [u8; 12];
+type TypeLED = gpio::gpioc::PC13<gpio::Output<gpio::PushPull>>;
 
+type TypeData = [u8; 12];
 
 #[entry]
 fn main() -> ! {
@@ -36,12 +38,18 @@ fn main() -> ! {
     // global setting
     let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
+
+    // led
+    let mut gpioc = dp.GPIOC.split(&mut rcc.apb2);
+    let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+
     // usart2 use pa2, pa3
     let mut gpioa = dp.GPIOA.split(&mut rcc.apb2);
     let (tx, rx) = (
         gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl),
         gpioa.pa3
     );
+
     // i2c use pb8, pb9
     let mut gpiob = dp.GPIOB.split(&mut rcc.apb2);
     let (scl, sda) = (
@@ -75,11 +83,18 @@ fn main() -> ! {
         1000,
         1000
     );
-    
+
+
+    let mut is_cmd: bool = false;
+    led.set_high().unwrap();
     loop {
-        let buffer = read_i2c(&mut iic1, &mut delay).unwrap();
-        export_uart(&mut uart2, buffer);
-        delay.delay_ms(1000_u16);
+        is_cmd = get_command(&mut led, &mut uart2);
+        if is_cmd {
+            // let buffer = read_i2c(&mut iic1, &mut delay).unwrap();
+            let buffer = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C];
+            export_uart(&mut led, &mut uart2, buffer);
+        }
+        led.set_high().unwrap();
     }
 }
 
@@ -102,11 +117,45 @@ fn read_i2c(iic: &mut TypeI2C1, delay: &mut Delay) -> Result<TypeData,()>{
     Ok(buffer)
 }
 
-fn export_uart(uart: &mut TypeUART2, data:TypeData) {
+fn get_command(led: &mut TypeLED, uart: &mut TypeUART2) -> bool{
+    let valid_cmd: [u8; 12] = [0x55, 0xB0, 0x15, 0x0B, 0x01, 0xDA, 0x13, 0x05, 0x01, 0xC0, 0x86, 0xED];
+
+    clear_uart(uart);
+    let mut count = 0;
+    while let Ok(word) = block!(uart.read()) {
+        if word==valid_cmd[count] {
+            count+=1;
+        } else {
+            // block!(uart.write(0xFF)).unwrap();
+            // block!(uart.write(word)).unwrap();
+            break;
+        }
+        if count==12 {
+            // for word in valid_cmd {
+            //     block!(uart.write(word)).unwrap();
+            // }
+            // break;
+            led.set_low().unwrap();
+            return true
+        }
+    }
+    false
+}
+
+fn clear_uart(uart: &mut TypeUART2) {
+    while let Ok(_) = uart.read() {
+        ();
+    }
+}
+
+
+fn export_uart(led: &mut TypeLED, uart: &mut TypeUART2, data:TypeData) {
+    led.set_high().unwrap();
     block!(uart.write(0x55)).unwrap();
     block!(uart.write(0xDB)).unwrap();
     for val in data {
         block!(uart.write(val)).unwrap();
     };
     block!(uart.write(0xED)).unwrap();
+    led.set_low().unwrap();
 }
