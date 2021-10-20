@@ -156,6 +156,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "546c37ac5d9e56f55e73b677106873d9d9f5190605e41a856503623648488cae"
 
 [[package]]
+name = "panic-halt"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de96540e0ebde571dc55c73d60ef407c653844e6f9a1e2fdbd40c07b9252d812"
+
+[[package]]
 name = "panic-semihosting"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -167,9 +173,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.29"
+version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9f5105d4fdaab20335ca9565e106a5d9b82b6219b5ba735731124ac6711d23d"
+checksum = "edc3358ebc67bc8b7fa0c007f945b0b18226f78437d61bec735a9eb96b61ee70"
 dependencies = [
  "unicode-xid",
 ]
@@ -242,7 +248,9 @@ dependencies = [
  "cortex-m-rt",
  "embedded-hal",
  "nb 1.0.0",
+ "panic-halt",
  "panic-semihosting",
+ "stm32f1 0.12.1",
  "stm32f1xx-hal",
 ]
 
@@ -259,6 +267,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "stm32f1"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ccfa19fef0f1655900103f3878db127e7b205e2e5730e3042d61f7e03602996"
+dependencies = [
+ "bare-metal",
+ "cortex-m 0.6.7",
+ "vcell",
+]
+
+[[package]]
 name = "stm32f1xx-hal"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -270,7 +289,7 @@ dependencies = [
  "cortex-m-rt",
  "embedded-hal",
  "nb 0.1.3",
- "stm32f1",
+ "stm32f1 0.11.0",
  "void",
 ]
 

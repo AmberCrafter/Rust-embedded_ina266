@@ -10,8 +10,11 @@ nb = "1.0.0"
 cortex-m = "0.6.3"
 cortex-m-rt = "0.6.12"
 embedded-hal = "0.2.4"
+panic-halt = "0.2.0"
 panic-semihosting = "0.5.6"
+stm32f1 = "0.12.1"
 
 [dependencies.stm32f1xx-hal]
-features = ["stm32f103", "rt", "medium"]
+# features = ["stm32f103", "rt", "medium"]
+features = ["stm32f103", "rt"]
 version = "0.6.1"
