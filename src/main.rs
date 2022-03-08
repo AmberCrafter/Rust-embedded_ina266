@@ -17,9 +17,7 @@ use panic_semihosting as _;
 use cortex_m::{self, asm::wfi, interrupt::Mutex};
 use cortex_m_rt::entry;
 use embedded_hal::digital::v2::OutputPin;
-use core::{cell::{Ref, RefCell}, ops::{Deref, DerefMut}};
-use stm32f1;
-
+use core::{cell::RefCell, ops::DerefMut};
 
 type TypeUART2 = Serial<pac::USART2,
     (
@@ -35,11 +33,10 @@ type TypeI2C1 = BlockingI2c<pac::I2C1,
 
 type TypeLED = gpio::gpioc::PC13<gpio::Output<gpio::PushPull>>;
 
-type TypeData = [u8; 12];
+type TypeData = [u8; 10];
 
 // setup globally storage
 static G_LED: Mutex<RefCell<Option<TypeLED>>> = Mutex::new(RefCell::new(None));
-// static G_UART2: Mutex<RefCell<Option<TypeUART2>>> = Mutex::new(RefCell::new(None));
 static G_RX: Mutex<RefCell<Option<serial::Rx<USART2>>>> = Mutex::new(RefCell::new(None));
 static G_TX: Mutex<RefCell<Option<serial::Tx<USART2>>>> = Mutex::new(RefCell::new(None));
 static G_I2C1: Mutex<RefCell<Option<TypeI2C1>>> = Mutex::new(RefCell::new(None));
@@ -47,131 +44,98 @@ static G_DATA: Mutex<RefCell<Option<TypeData>>> = Mutex::new(RefCell::new(None))
 static G_DELAY: Mutex<RefCell<Option<Delay>>> = Mutex::new(RefCell::new(None));
 static G_TIM: Mutex<RefCell<Option<CountDownTimer<TIM2>>>> = Mutex::new(RefCell::new(None));
 
-// interrupt process
+static G_COUNTER: Mutex<RefCell<Option<usize>>> = Mutex::new(RefCell::new(None));
+static G_BUFFER: Mutex<RefCell<Option<[u8;16]>>> = Mutex::new(RefCell::new(None));
+
+static G_VALID_CMD: [u8; 12] = [0x55, 0xB0, 0x15, 0x0B, 0x01, 0xDA, 0x13, 0x05, 0x01, 0xC0, 0x86, 0xED];
+
+// interrupt processs
 #[interrupt]
 fn USART2() {
-    static mut LED: Option<TypeLED> = None;
-    // static mut UART: Option<TypeUART2> = None;
-    static mut TX: Option<serial::Tx<USART2>> = None;
-    static mut RX: Option<serial::Rx<USART2>> = None;
-    static mut DATA: Option<TypeData> = None;
+    // static mut DATA: Option<TypeData> = None;
+    // static mut LED: Option<TypeLED> = None;
+    static mut BUF: Option<[u8; 16]> = None;
+    static mut COUNT: Option<usize> = None;
 
-    let led = LED.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs| {
-            // Move LED pin here, leaving a None in its place
-            G_LED.borrow(cs).replace(None).unwrap()
-        })
-    });
-    // let uart = UART.get_or_insert_with(|| {
+    // let led = LED.get_or_insert_with(|| {
     //     cortex_m::interrupt::free(|cs| {
     //         // Move LED pin here, leaving a None in its place
-    //         G_UART2.borrow(cs).replace(None).unwrap()
+    //         G_LED.borrow(cs).replace(None).unwrap()
     //     })
     // });
-    let tx = TX.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs| {
-            // Move LED pin here, leaving a None in its place
-            G_TX.borrow(cs).borrow_mut().replace(None).unwrap()
-        })
-    });
-    let rx = RX.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs| {
-            // Move LED pin here, leaving a None in its place
-            G_RX.borrow(cs).replace(None).unwrap()
-        })
-    });
-
-    let data = DATA.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs| {
-            // Move LED pin here, leaving a None in its place
-            G_DATA.borrow(cs).replace(None).unwrap()
-        })
-    });
-
-    // uart.is_rx_not_empty();
-    // unsafe{ (*USART2::ptr()).sr.read().rxne().bit() };
-    // unsafe{ (*USART2::ptr()).sr.modify(|_,w| w.rxne().set_bit()) };
-
-    // if uart.is_rxne(){
-
-    led.set_low().unwrap();
-    block!( tx.write(0x55) ).unwrap();
-    block!( tx.write(0x33) ).unwrap();
-    let word = block!(rx.read()).unwrap();
-    block!( tx.write(word) ).unwrap();
-
-    // } 
 
     // if led.is_set_high().unwrap() {
-    //     // block!(uart2.write(0x00)).unwrap();
     //     led.set_low().unwrap();
     // } else {
-    //     // block!(uart2.write(0xff)).unwrap();
     //     led.set_high().unwrap();
     // }
-
-    // let trigger = get_command(led, uart);
-    
-
-    // if trigger {
-    //     export_uart(led, uart, *data);
-    // };
-    // uart.flush().unwrap();
-
-    // cortex_m::interrupt::free(|cs| {
-    //     if let (Some(ref mut tx), Some(ref mut rx)) = (
-    //         G_TX.borrow(cs).borrow_mut().deref_mut(),
-    //         G_RX.borrow(cs).borrow_mut().deref_mut(),
-    //     ) {
-    //         match block!(rx.read()) {
-    //             Ok(byte) => {
-    //                 match block!(tx.write(byte)) {
-    //                     Ok(_) => {
-    //                     }
-    //                     Err(error) => {
-    //                     }
-    //                 }
-    //             }
-    //             Err(error) => {
-    //             }
-    //         }
-    //     }
+    // let data = DATA.get_or_insert_with(|| {
+    //     cortex_m::interrupt::free(|cs| {
+    //         // Move LED pin here, leaving a None in its place
+    //         G_DATA.borrow(cs).replace(None).unwrap()
+    //     })
     // });
+
+    let buffer =  BUF.get_or_insert_with(|| {
+            cortex_m::interrupt::free(|cs| {
+                G_BUFFER.borrow(cs).replace(None).unwrap()
+        })
+    });
+    let counter = unsafe{
+        COUNT.get_or_insert_with(|| {
+            cortex_m::interrupt::free(|cs| {
+                G_COUNTER.borrow(cs).replace(None).unwrap()
+            })
+        })
+    };
+
+    cortex_m::interrupt::free(|cs| {
+        if let (Some(ref mut tx), Some(ref mut rx), Some(ref mut data)) = (
+            G_TX.borrow(cs).borrow_mut().deref_mut(),
+            G_RX.borrow(cs).borrow_mut().deref_mut(),
+            G_DATA.borrow(cs).borrow_mut().deref_mut(),
+        ) {
+            match block!(rx.read()) {
+                Ok(byte) => {
+                    // match block!( tx.write(byte) ) {
+                    //     Ok(_) => {
+                    //     }
+                    //     Err(error) => {
+                    //     }
+                    // }
+                    // match block!( tx.write(*counter as u8) ) {
+                    //     Ok(_) => {
+                    //     }
+                    //     Err(error) => {
+                    //     }
+                    // }
+                    if byte==G_VALID_CMD[*counter]{
+                        buffer[*counter] = byte;
+                        // block!( tx.write(buffer[*counter]) ).unwrap();
+                        if *counter>=11 {
+                            (*counter) = 0;
+                            // for word in buffer {
+                            //     block!(tx.write(*word)).unwrap();
+                            // }
+                            // export_tx(led, tx, *data);
+                            export_tx(tx, *data);
+                        } else {
+                            (*counter)+=1;
+                        }
+                    } else {
+                        (*counter) = 0;
+                    }
+                }
+                Err(error) => {
+                }
+            }
+        }
+    });
 }
 
 #[interrupt]
 fn TIM2() {
-    static mut LED: Option<TypeLED> = None;
-    static mut IIC: Option<TypeI2C1> = None;
-    static mut DATA: Option<TypeData> = None;
-    static mut DELAY: Option<Delay> = None;
     static mut TIM: Option<CountDownTimer<TIM2>> = None;
-
-    let led = LED.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs| {
-            // Move LED pin here, leaving a None in its place
-            G_LED.borrow(cs).replace(None).unwrap()
-        })
-    });
-
-    let iic = IIC.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs|{
-            G_I2C1.borrow(cs).replace(None).unwrap()
-        })
-    });
-
-    let data = DATA.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs| {
-            // Move LED pin here, leaving a None in its place
-            G_DATA.borrow(cs).replace(None).unwrap()
-        })
-    });
-
-    let delay = DELAY.get_or_insert_with(|| {
-        cortex_m::interrupt::free(|cs| {
-            G_DELAY.borrow(cs).replace(None).unwrap()
-        })
-    });
 
     let tim = TIM.get_or_insert_with(|| {
         cortex_m::interrupt::free(|cs| {
@@ -179,19 +143,37 @@ fn TIM2() {
             G_TIM.borrow(cs).replace(None).unwrap()
         })
     });
-
-    // *data = read_i2c(iic, delay).unwrap();
+    
     tim.clear_update_interrupt_flag();
 
-    // if led.is_set_high().unwrap() {
-    //     // block!(uart2.write(0x00)).unwrap();
-    //     led.set_low().unwrap();
-    // } else {
-    //     // block!(uart2.write(0xff)).unwrap();
-    //     led.set_high().unwrap();
-    // }
+    cortex_m::interrupt::free(|cs| {
+        if let (Some(ref mut data), Some(ref mut iic), Some(ref mut delay), Some(ref mut led)) = (
+            G_DATA.borrow(cs).borrow_mut().deref_mut(),
+            G_I2C1.borrow(cs).borrow_mut().deref_mut(),
+            G_DELAY.borrow(cs).borrow_mut().deref_mut(),
+            G_LED.borrow(cs).borrow_mut().deref_mut(),
+        ) {
+            led.set_low().unwrap();
+            let dummy = read_i2c(iic, delay).unwrap();
+            for (i, &val) in dummy.iter().enumerate() {
+                data[i] = val;
+            }
+            delay.delay_ms(10_u16);
+            led.set_high().unwrap();
+        }
+    });
 
-    // block!(uart2.write(0xAA)).unwrap();
+    // cortex_m::interrupt::free(|cs| {
+    //     if let (Some(ref mut data), Some(ref mut tx)) = (
+    //         G_DATA.borrow(cs).borrow_mut().deref_mut(),
+    //         G_TX.borrow(cs).borrow_mut().deref_mut(),
+    //     ) {
+    //         for word in data {
+    //             block!(tx.write(*word)).unwrap();
+    //         }
+    //     }
+    // });
+
     let _ = tim.wait();
 }
 
@@ -207,7 +189,6 @@ fn main() -> ! {
     let mut flash = dp.FLASH.constrain();
 
     // impl gpio including afio (used to map pin function) and clocks
-    // global setting
     let mut afio = dp.AFIO.constrain(&mut rcc.apb2);
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
 
@@ -256,11 +237,14 @@ fn main() -> ! {
         1000
     );
 
-    let data: TypeData = [0xff_u8; 12];
+    let data: TypeData = [0xff_u8; 10];
 
     led.set_high().unwrap();
 
     // setup global variables
+    cortex_m::interrupt::free(|cs| *G_COUNTER.borrow(cs).borrow_mut() = Some(0));
+    cortex_m::interrupt::free(|cs| *G_BUFFER.borrow(cs).borrow_mut() = Some([0;16]));
+
     cortex_m::interrupt::free(|cs| *G_DATA.borrow(cs).borrow_mut() = Some(data));
     cortex_m::interrupt::free(|cs| *G_LED.borrow(cs).borrow_mut() = Some(led));
     cortex_m::interrupt::free(|cs| *G_I2C1.borrow(cs).borrow_mut() = Some(iic1));
@@ -272,9 +256,10 @@ fn main() -> ! {
     uart2.listen(serial::Event::Rxne);
     timer.listen(Event::Update);
 
-    // cortex_m::interrupt::free(|cs| *G_UART2.borrow(cs).borrow_mut() = Some(uart2));
     cortex_m::interrupt::free(|cs| *G_TIM.borrow(cs).borrow_mut() = Some(timer));
-    let (mut tx, mut rx) = uart2.split();
+
+    // setup dma for rx
+    let (tx, rx) = uart2.split();
     cortex_m::interrupt::free(|cs| *G_TX.borrow(cs).borrow_mut() = Some(tx));
     cortex_m::interrupt::free(|cs| *G_RX.borrow(cs).borrow_mut() = Some(rx));
     
@@ -293,65 +278,68 @@ fn main() -> ! {
 
 fn read_i2c(iic: &mut TypeI2C1, delay: &mut Delay) -> Result<TypeData,()>{
     const IICADDR: u8 = 0x45;
-    // const IICOPC1: u8 = 0x00;
-    // const IICOPC2: u8 = 0x00;
-
-    let mut buffer: TypeData = [0; 12];
+    let mut buffer: TypeData = [0; 10];
 
     // read bus voltage from ina226 with measurement 1.1ms
-    let ina226_vbus_addr = 0..6_u8;
+    let ina226_vbus_addr = 0..5_u8;
     for addr in ina226_vbus_addr{
-        let buffer_offset = (addr as usize)*2;
+        let buffer_offset = (addr)*2;
         if iic.write(IICADDR, &[addr]).is_ok() {
             delay.delay_ms(2_u16);
-            iic.read(IICADDR, &mut buffer[buffer_offset..]).unwrap();
+            iic.read(IICADDR, &mut buffer[buffer_offset.into()..]).unwrap();
         };
     }
     Ok(buffer)
 }
 
-fn get_command(led: &mut TypeLED, uart: &mut TypeUART2) -> bool{
-    let valid_cmd: [u8; 12] = [0x55, 0xB0, 0x15, 0x0B, 0x01, 0xDA, 0x13, 0x05, 0x01, 0xC0, 0x86, 0xED];
+// fn export_tx(led: &mut TypeLED, tx: &mut serial::Tx<USART2>, data:TypeData) {
+//     let mut buffer: [u8; 32] = [
+//         0x55, 0xDA, 0x13, 0x05, 0x01,
+//         0xB0, 0x15, 0x0B, 0x01,
+//         0xC0, 0x00, 0x14,
+//         0x01, 0x02, 0x03, 0x04,
+//         0x05, 0x06, 0x07, 0x08,
+//         0x09, 0x0A, 0xFF, 0xED,
+//         0x00, 0x00, 0x00, 0x00,
+//         0x00, 0x00, 0x00, 0x00,
+//     ];
+//     for (i, &val) in data.iter().enumerate() {
+//         buffer[12+i] = val;
+//     }
+//     buffer[22] = checksum(&buffer[1..22]);
 
-    clear_uart(uart);
-    // let mut count = 0;
-    // while let Ok(word) = block!(uart.read()) {
-    //     if word==valid_cmd[count] {
-    //         count+=1;
-    //     } else {
-    //         // block!(uart.write(0xFF)).unwrap();
-    //         // block!(uart.write(word)).unwrap();
-    //         break;
-    //     }
-    //     if count==12 {
-    //         // for word in valid_cmd {
-    //         //     block!(uart.write(word)).unwrap();
-    //         // }
-    //         // break;
-    //         led.set_low().unwrap();
-    //         return true
-    //     }
-    // }
-    false
-}
+//     led.set_low().unwrap();
+//     for val in buffer {
+//         block!(tx.write(val)).unwrap();
+//     };
+//     led.set_high().unwrap();
+// }
 
-fn clear_uart(uart: &mut TypeUART2) {
-    while let Ok(_) = uart.read() {
-        ();
+fn export_tx(tx: &mut serial::Tx<USART2>, data:TypeData) {
+    let mut buffer: [u8; 32] = [
+        0x55, 0xDA, 0x13, 0x05, 0x01,
+        0xB0, 0x15, 0x0B, 0x01,
+        0xC0, 0x00, 0x14,
+        0x01, 0x02, 0x03, 0x04,
+        0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0A, 0xFF, 0xED,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+    for (i, &val) in data.iter().enumerate() {
+        buffer[12+i] = val;
     }
-    // while let Ok(word) = uart.read() {
-    //     block!(uart.write(word)).unwrap();
-    // }
+    buffer[22] = checksum(&buffer[1..22]);
+
+    for val in buffer {
+        block!(tx.write(val)).unwrap();
+    };
 }
 
-
-fn export_uart(led: &mut TypeLED, uart: &mut TypeUART2, data:TypeData) {
-    led.set_high().unwrap();
-    block!(uart.write(0x55)).unwrap();
-    block!(uart.write(0xDB)).unwrap();
-    for val in data {
-        block!(uart.write(val)).unwrap();
-    };
-    block!(uart.write(0xED)).unwrap();
-    led.set_low().unwrap();
+fn checksum(data: &[u8]) -> u8 {
+    let mut temp:i32 = 0;
+    for &val in data {
+        temp += val as i32;
+    }
+    (temp%255) as u8
 }
